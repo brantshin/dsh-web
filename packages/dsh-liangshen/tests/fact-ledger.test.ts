@@ -72,6 +72,50 @@ describe('fact-ledger foldFactLedger', () => {
   })
 })
 
+/** A fact_register event in the shape the `ptc` wire records: object arguments. */
+function ptc(args, isError = false) {
+  return { type: 'tool/ptc-dispatch', data: { name: FACT_LEDGER_TOOL, arguments: args, isError } }
+}
+
+describe('fact-ledger foldFactLedger under the ptc wire', () => {
+  it('operator sees a fact pinned through the ptc wire land in the register', () => {
+    // Given a pin recorded as a programmatic dispatch rather than a top-level call.
+    // When the fold runs, Then the fact reaches the register.
+    expect(foldFactLedger([ptc({ fact: 'pin via ptc', tag: 'wire' })])).toEqual([{ text: 'pin via ptc', tag: 'wire' }])
+  })
+
+  it('operator sees a ptc revocation drop the fact by tag and by exact text', () => {
+    // Given ptc pins followed by ptc revocations, one by tag and one by exact text.
+    const byTag = [ptc({ fact: 'a', tag: 't1' }), ptc({ fact: 'b' }), ptc({ revoke: 't1' })]
+    const byText = [ptc({ fact: 'c' }), ptc({ revoke: 'c' })]
+    // When folded, Then each revocation removes exactly its target.
+    expect(foldFactLedger(byTag).map(entry => entry.text)).toEqual(['b'])
+    expect(foldFactLedger(byText)).toEqual([])
+  })
+
+  it('operator does not see a failed ptc dispatch take effect', () => {
+    // Given an errored dispatch that still carries a valid-looking revocation.
+    const events = [ptc({ fact: 'keep', tag: 't1' }), ptc({ revoke: 't1' }, true)]
+    // When folded, Then the failed dispatch is ignored and the fact survives.
+    expect(foldFactLedger(events).map(entry => entry.text)).toEqual(['keep'])
+  })
+
+  it('operator sees both wires folded in stream order under the same cap', () => {
+    // Given a stream mixing both shapes, a duplicate, and enough pins to overflow MAX_FACTS.
+    const events = [
+      pin('native one'),
+      ptc({ fact: 'ptc one' }),
+      pin('native one'),
+      ...Array.from({ length: MAX_FACTS }, (_, i) => ptc({ fact: `bulk ${i}` })),
+    ]
+    // When folded, Then stream order holds, the duplicate is dropped, and the cap keeps the newest.
+    const facts = foldFactLedger(events)
+    expect(facts.length).toBe(MAX_FACTS)
+    expect(facts[0].text).toBe('bulk 0')
+    expect(facts[facts.length - 1].text).toBe(`bulk ${MAX_FACTS - 1}`)
+  })
+})
+
 describe('fact-ledger renderLedgerField', () => {
   it('operator sees no field on an empty register and tags rendered inline otherwise', () => {
     // Given an empty register and a register with one tagged fact.
