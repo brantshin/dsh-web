@@ -13,8 +13,10 @@
  * renders the current facts as one of its fields, republished only on change.
  *
  * The register itself is a list of single-line facts, newest last, rebuilt by
- * replaying `tool/call` events for this tool from the session log — exactly
- * the way the paging activation state replays. A fact is a string the model
+ * replaying this tool's calls out of the session log — exactly the way the
+ * paging activation state replays, and under both wire shapes: a top-level
+ * `tool/call` (the `native` presentation) and the `tool/ptc-dispatch` event
+ * the `ptc` presentation records, which is the factory default. A fact is a
  * writes; registering a new fact APPENDS, and registering one already present
  * is a no-op report. REVOCATION is append-only too: a `revoke` entry removes
  * every earlier fact carrying the same tag, so the fold stays deterministic
@@ -59,11 +61,22 @@ export const MAX_FACTS = 12
  * ids — revocation matches on the optional `tag`, and an untagged fact can
  * only be revoked by revoking its exact text as the tag of last resort.
  */
+function ledgerCallData(event) {
+  if (event?.type === 'tool/ptc-dispatch') {
+    const dispatch = event.data
+    if (dispatch?.name !== FACT_LEDGER_TOOL || dispatch?.isError === true) return undefined
+    return dispatch
+  }
+  if (event?.type !== 'tool/call' || event.data?.name !== FACT_LEDGER_TOOL) return undefined
+  return event.data
+}
+
 export function foldFactLedger(events) {
   const facts = []
   for (const event of Array.isArray(events) ? events : []) {
-    if (event?.type !== 'tool/call' || event.data?.name !== FACT_LEDGER_TOOL) continue
-    let args = event.data?.arguments
+    const data = ledgerCallData(event)
+    if (data === undefined) continue
+    let args = data.arguments
     if (typeof args === 'string') {
       try { args = JSON.parse(args) } catch { args = undefined }
     }
